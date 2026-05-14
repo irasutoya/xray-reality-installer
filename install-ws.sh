@@ -152,20 +152,21 @@ install_xray() {
   log "下载并安装 Xray..."
   mkdir -p "$INSTALL_DIR"
 
-  # 获取最新版本
+  # 获取最新版本；如果 GitHub API 不可用，直接使用 latest/download 链接
   LATEST_VERSION=$(curl -s -m 10 https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
   if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
     warn "获取最新版本失败，尝试使用备用方法..."
     LATEST_VERSION=$(curl -s -m 10 https://api.github.com/repos/XTLS/Xray-core/tags | jq -r '.[0].name')
-    
-    if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
-      error "无法获取 Xray 版本信息，请检查网络连接或 GitHub API 访问"
-      exit 1
-    fi
   fi
 
-  DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/${LATEST_VERSION}/Xray-linux-${ARCH}.zip"
-  log "下载版本: ${LATEST_VERSION}, 架构: ${ARCH}"
+  if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
+    warn "无法获取版本信息，将直接使用 GitHub latest 下载链接"
+    DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${ARCH}.zip"
+    log "下载版本: latest, 架构: ${ARCH}"
+  else
+    DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/${LATEST_VERSION}/Xray-linux-${ARCH}.zip"
+    log "下载版本: ${LATEST_VERSION}, 架构: ${ARCH}"
+  fi
 
   # 下载并解压
   wget -q -O "/tmp/xray.zip" "$DOWNLOAD_URL" || {
