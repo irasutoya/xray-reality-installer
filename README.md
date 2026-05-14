@@ -1,25 +1,36 @@
 # Xray 代理服务一键安装脚本
 
-## 功能介绍
+用于在 Linux 服务器上自动安装和配置 Xray。仓库提供两个安装入口：
 
-这是一个用于自动安装和配置 Xray 的脚本，主要功能包括：
+- `install.sh`: VLESS + Vision + REALITY，默认端口 `443`
+- `install-ws.sh`: VLESS + WebSocket，默认端口 `80`
 
-- 自动检测系统架构并安装对应版本的 Xray
-- 自动生成 REALITY 密钥对
-- 配置 VLESS + Vision + REALITY 协议
-- 创建并启用 systemd 服务
-- 生成客户端配置信息（Vless URL 和 Mihomo 配置）
+## 功能
+
+- 自动检测系统架构并下载对应版本的 Xray
+- 自动生成 UUID；REALITY 模式会额外生成密钥对和 short ID
+- 自动创建 Xray 配置文件和 systemd 服务
+- 安装完成后输出 VLESS URL 与 Mihomo 配置
+- 支持卸载已安装的 Xray 服务和相关文件
 
 ## 系统要求
 
-- 支持 Debian/Ubuntu 或 CentOS/RHEL 系列 Linux 系统
-- 需要 root 权限运行
-- 支持的系统架构：x86_64 (64), aarch64 (arm64-v8a), armv7l (arm32-v7a), armv6l (arm32-v6), i386/i686 (32), mips64le, mipsle
+- Debian/Ubuntu 或 CentOS/RHEL/Fedora 系 Linux 系统
+- 需要使用 `root` 用户运行
+- 支持架构：`x86_64`、`aarch64`、`armv7l`、`armv6l`、`i386/i686`、`mips64le`、`mipsle`
 
 ## 使用方法
 
+REALITY 模式：
+
 ```shell
 bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install.sh)
+```
+
+WebSocket 模式：
+
+```shell
+bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install-ws.sh)
 ```
 
 ## 命令选项
@@ -28,57 +39,33 @@ bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install.
 用法: install.sh [选项]
 
 选项:
-  -port        设置监听端口 (默认: 443)
-  -uuid        设置 VLESS UUID (默认: 随机生成)
+  -port        设置监听端口，REALITY 默认 443，WebSocket 默认 80
+  -uuid        设置 VLESS UUID，默认随机生成
   -uninstall   卸载 Xray 服务及所有相关文件
   -help        显示帮助信息
 ```
 
+示例：
+
+```shell
+bash install.sh -port 8443
+bash install-ws.sh -port 8080 -uuid 00000000-0000-4000-8000-000000000000
+bash install.sh -uninstall
+```
+
 ## 安装路径
 
-- 主目录: `/root/xray`
-- 可执行文件: `/root/xray/bin/xray`
-- 配置文件: `/root/xray/config/config.json`
-- 服务文件: `/etc/systemd/system/xray.service`
-
-## 客户端配置
-
-安装完成后，脚本会自动生成以下格式的客户端配置信息：
-
-### VLESS URL 格式
-
-```
-vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${DOMAIN}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}#${SERVER_IP}
-```
-
-### Clash Meta 格式
-
-```yaml
-proxies:
-  - name: ${SERVER_IP}
-    server: ${SERVER_IP}
-    port: ${PORT}
-    type: vless
-    uuid: ${UUID}
-    tls: true
-    flow: xtls-rprx-vision
-    reality-opts:
-      public-key: ${PUBLIC_KEY}
-      short-id: ${SHORT_ID}
-    servername: ${DOMAIN}
-    client-fingerprint: chrome
-    network: tcp
-
-```
+- 主目录：`/root/xray`
+- 可执行文件：`/root/xray/bin/xray`
+- 配置文件：`/root/xray/config/config.json`
+- systemd 服务：`/etc/systemd/system/xray.service`
 
 ## 故障排除
 
-- 如果服务启动失败，可以使用 `journalctl -u xray` 查看详细日志
-- 确保防火墙已开放对应端口
-- 如需重新配置，可以先卸载再重新安装
+- 如果服务启动失败，使用 `journalctl -u xray` 查看日志
+- 确认防火墙和云厂商安全组已放行对应端口
+- 如需重新配置，可以先执行 `-uninstall` 后重新安装
 
-## 警告
+## 免责声明
 
-本程序仅供学习了解, 非盈利目的，请于下载后 24 小时内删除, 不得用作任何商业用途, 文字、数据及图片均有所属版权, 如转载须注明来源。
-
-使用本程序必循遵守部署免责声明。使用本程序必循遵守部署服务器所在地、所在国家和用户所在国家的法律法规, 程序作者不对使用者任何不当行为负责。
+本项目仅供学习和技术研究使用。使用者必须遵守服务器所在地、所在国家和用户所在地的法律法规。因不当使用产生的任何后果由使用者自行承担。
