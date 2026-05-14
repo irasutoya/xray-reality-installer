@@ -151,6 +151,60 @@ determine_architecture() {
   log "检测到架构：$ARCH"
 }
 
+build_proxy_url() {
+  local proxy="$1"
+  local url="$2"
+
+  if [[ -z "$proxy" ]]; then
+    echo "$url"
+  elif [[ "$proxy" == *"{url}"* ]]; then
+    echo "${proxy/\{url\}/$url}"
+  else
+    echo "${proxy%/}/$url"
+  fi
+}
+
+download_xray_archive() {
+  local url="$1"
+  local output="$2"
+  local proxy candidate
+  local proxies=()
+
+  if [[ -n "${XRAY_DOWNLOAD_PROXY:-}" ]]; then
+    proxies+=("${XRAY_DOWNLOAD_PROXY}")
+  fi
+
+  if [[ -n "${GH_PROXY:-}" ]]; then
+    proxies+=("${GH_PROXY}")
+  fi
+
+  proxies+=(
+    ""
+    "https://ghfast.top/"
+    "https://gh.llkk.cc/"
+    "https://gh-proxy.com/"
+    "https://hub.gitmirror.com/"
+  )
+
+  for proxy in "${proxies[@]}"; do
+    candidate=$(build_proxy_url "$proxy" "$url")
+    if [[ -z "$proxy" ]]; then
+      log "尝试直连下载: $candidate"
+    else
+      log "尝试 Proxy 下载: $candidate"
+    fi
+
+    if wget -q -O "$output" "$candidate" && [ -s "$output" ]; then
+      return 0
+    fi
+
+    rm -f "$output"
+    warn "下载失败: $candidate"
+  done
+
+  return 1
+}
+
 # 安装 Xray
 install_xray() {
   log "下载并安装 Xray..."
@@ -173,7 +227,7 @@ install_xray() {
   fi
 
   # 下载并解压
-  wget -q -O "/tmp/xray.zip" "$DOWNLOAD_URL" || {
+  download_xray_archive "$DOWNLOAD_URL" "/tmp/xray.zip" || {
     error "下载 Xray 失败，请检查网络连接"
     exit 1
   }
