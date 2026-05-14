@@ -1,84 +1,141 @@
-# Xray 代理服务一键安装脚本
+# Xray VLESS + Vision + REALITY 一键安装脚本
 
-## 功能介绍
+这个仓库提供一个面向 Linux 服务器的 Xray 一键安装脚本，默认部署 VLESS + XTLS Vision + REALITY。
 
-这是一个用于自动安装和配置 Xray 的脚本，主要功能包括：
+## 主要变化
 
-- 自动检测系统架构并安装对应版本的 Xray
-- 自动生成 REALITY 密钥对
-- 配置 VLESS + Vision + REALITY 协议
-- 创建并启用 systemd 服务
-- 生成客户端配置信息（Vless URL 和 Mihomo 配置）
+- 默认客户端指纹改为 `chrome`。
+- 默认 REALITY 伪装地址改为 `aod.itunes.apple.com:443`，SNI 为 `aod.itunes.apple.com`。
+- 支持通过参数覆盖 REALITY 目标：`-server-name` 和 `-target`。
+- 安装路径恢复为 `/root/xray`，方便按原脚本习惯管理。
+- 因为 `/root` 默认不允许普通用户遍历，服务默认以 `root` 用户运行。
+- systemd 保留基础加固：`NoNewPrivileges`、`ProtectHome=read-only`、独立临时目录、仅保留绑定低端口能力。
+- 下载 Xray 后会在校验文件可用时验证 SHA-256。
+- 参数校验更严格：端口、UUID、短 ID、REALITY target、fingerprint 都会先验证。
 
-## 系统要求
-
-- 支持 Debian/Ubuntu 或 CentOS/RHEL 系列 Linux 系统
-- 需要 root 权限运行
-- 支持的系统架构：x86_64 (64), aarch64 (arm64-v8a), armv7l (arm32-v7a), armv6l (arm32-v6), i386/i686 (32), mips64le, mipsle
-
-## 使用方法
+## 使用方式
 
 ```shell
 bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install.sh)
 ```
 
-## 命令选项
+本地运行：
 
 ```shell
-用法: install.sh [选项]
+bash install.sh
+```
 
-选项:
-  -port        设置监听端口 (默认: 443)
-  -uuid        设置 VLESS UUID (默认: 随机生成)
-  -uninstall   卸载 Xray 服务及所有相关文件
-  -help        显示帮助信息
+WebSocket 版本：
+
+```shell
+bash install-ws.sh
+```
+
+## 参数
+
+```text
+Usage:
+  install.sh [options]
+
+Options:
+  -port <1-65535>          监听端口，默认 443
+  -uuid <uuid>             VLESS UUID，默认自动生成
+  -version <tag|latest>    Xray 版本，例如 v25.4.30，默认 latest
+  -server-name <domain>    REALITY SNI/serverName，默认 aod.itunes.apple.com
+  -target <host:port>      REALITY target，默认 aod.itunes.apple.com:443
+  -fingerprint <name>      uTLS 客户端指纹，默认 chrome
+  -short-id <hex>          REALITY shortId，偶数长度十六进制，最长 16 字符，默认随机
+  -no-start                只安装并校验配置，不启动服务
+  -uninstall               卸载服务和已安装文件
+  -help                    显示帮助
+```
+
+示例：
+
+```shell
+bash install.sh -port 443 -server-name aod.itunes.apple.com -target aod.itunes.apple.com:443
+```
+
+WebSocket 版本支持：
+
+```text
+  -port <1-65535>          监听端口，默认 80
+  -uuid <uuid>             VLESS UUID，默认自动生成
+  -version <tag|latest>    Xray 版本，例如 v25.4.30，默认 latest
+  -path <path>             WebSocket 路径，默认 /
+  -host <domain|ip>        客户端输出中的 WebSocket Host，默认服务器 IP
+  -no-start                只安装并校验配置，不启动服务
+  -uninstall               卸载服务和已安装文件
 ```
 
 ## 安装路径
 
-- 主目录: `/root/xray`
-- 可执行文件: `/root/xray/bin/xray`
-- 配置文件: `/root/xray/config/config.json`
-- 服务文件: `/etc/systemd/system/xray.service`
+- 主目录：`/root/xray`
+- 二进制：`/root/xray/bin/xray`
+- 配置文件：`/root/xray/config/config.json`
+- 运行状态目录：`/root/xray/state`
+- systemd 服务：`/etc/systemd/system/xray.service`
 
-## 客户端配置
+## 客户端配置格式
 
-安装完成后，脚本会自动生成以下格式的客户端配置信息：
+安装完成后脚本会输出 VLESS URL 和 Mihomo / Clash Meta 配置。
 
-### VLESS URL 格式
+VLESS URL 中的核心参数：
 
+```text
+security=reality
+flow=xtls-rprx-vision
+sni=aod.itunes.apple.com
+fp=chrome
+type=tcp
 ```
-vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${DOMAIN}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}#${SERVER_IP}
-```
 
-### Clash Meta 格式
+Mihomo / Clash Meta 中的核心参数：
 
 ```yaml
-proxies:
-  - name: ${SERVER_IP}
-    server: ${SERVER_IP}
-    port: ${PORT}
-    type: vless
-    uuid: ${UUID}
-    tls: true
-    flow: xtls-rprx-vision
-    reality-opts:
-      public-key: ${PUBLIC_KEY}
-      short-id: ${SHORT_ID}
-    servername: ${DOMAIN}
-    client-fingerprint: chrome
-    network: tcp
-
+network: tcp
+servername: aod.itunes.apple.com
+client-fingerprint: chrome
+reality-opts:
+  public-key: <PUBLIC_KEY>
+  short-id: <SHORT_ID>
 ```
 
-## 故障排除
+## REALITY 目标选择
 
-- 如果服务启动失败，可以使用 `journalctl -u xray` 查看详细日志
-- 确保防火墙已开放对应端口
-- 如需重新配置，可以先卸载再重新安装
+脚本默认使用 `aod.itunes.apple.com:443` 作为通用默认值。更稳妥的做法是根据服务器网络环境自行选择目标，并用以下条件筛选：
 
-## 警告
+- 支持 TLS 1.3 和 HTTP/2。
+- 域名本身不要只做跳转。
+- 目标 IP 与服务器网络位置接近时更自然、延迟更低。
+- 避免选择容易导致回落流量被滥用的目标。
 
-本程序仅供学习了解, 非盈利目的，请于下载后 24 小时内删除, 不得用作任何商业用途, 文字、数据及图片均有所属版权, 如转载须注明来源。
+可以在服务器上用 Xray 检查目标：
 
-使用本程序必循遵守部署免责声明。使用本程序必循遵守部署服务器所在地、所在国家和用户所在国家的法律法规, 程序作者不对使用者任何不当行为负责。
+```shell
+xray tls ping aod.itunes.apple.com
+```
+
+## 常用命令
+
+查看服务状态：
+
+```shell
+systemctl status xray --no-pager
+```
+
+查看日志：
+
+```shell
+journalctl -u xray -e --no-pager
+```
+
+卸载：
+
+```shell
+bash install.sh -uninstall
+```
+
+## 说明
+
+请只在你有权管理的服务器上使用，并遵守服务器所在地和使用所在地的法律法规。

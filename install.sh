@@ -1,241 +1,357 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
 
-# Xray VLESS + Vision + REALITY 安装脚本
+SCRIPT_NAME="$(basename "$0")"
+BASE_DIR="${BASE_DIR:-/root/xray}"
+XRAY_USER="${XRAY_USER:-root}"
+INSTALL_PATH="${INSTALL_PATH:-${BASE_DIR}/bin/xray}"
+CONFIG_DIR="${CONFIG_DIR:-${BASE_DIR}/config}"
+CONFIG_FILE="${CONFIG_FILE:-${CONFIG_DIR}/config.json}"
+SERVICE_FILE="${SERVICE_FILE:-/etc/systemd/system/xray.service}"
+STATE_DIR="${STATE_DIR:-${BASE_DIR}/state}"
 
-# 全局变量定义
-BASE_DIR="/root/xray"
-INSTALL_DIR="${BASE_DIR}/bin"
-CONFIG_DIR="${BASE_DIR}/config"
-SERVICE_FILE="/etc/systemd/system/xray.service"
-CONFIG_FILE="${CONFIG_DIR}/config.json"
-DOMAIN="gateway.icloud.com"
-PORT=443
-UUID=$(cat /proc/sys/kernel/random/uuid)
+PORT="${PORT:-443}"
+UUID="${UUID:-}"
+VERSION="${VERSION:-latest}"
+REALITY_SERVER_NAME="${REALITY_SERVER_NAME:-aod.itunes.apple.com}"
+REALITY_TARGET="${REALITY_TARGET:-${REALITY_SERVER_NAME}:443}"
+CLIENT_FINGERPRINT="${CLIENT_FINGERPRINT:-chrome}"
+SHORT_ID="${SHORT_ID:-}"
 PRIVATE_KEY=""
 PUBLIC_KEY=""
-SHORT_ID=$(openssl rand -hex 8)
+UNINSTALL=false
+NO_START=false
+TARGET_SET=false
 
-# 颜色定义
-GREEN="\033[1;32m"
-RED="\033[1;31m"
-BLUE="\033[1;34m"
-YELLOW="\033[1;33m"
-NC="\033[0m"
+TMP_DIR=""
 
-# 日志函数
-log() {
-  echo -e "${GREEN}[INFO]${NC} $1"
+GREEN=$'\033[1;32m'
+RED=$'\033[1;31m'
+BLUE=$'\033[1;34m'
+YELLOW=$'\033[1;33m'
+NC=$'\033[0m'
+
+log() { printf '%b[INFO]%b %s\n' "$GREEN" "$NC" "$*"; }
+warn() { printf '%b[WARN]%b %s\n' "$YELLOW" "$NC" "$*"; }
+die() { printf '%b[ERROR]%b %s\n' "$RED" "$NC" "$*" >&2; exit 1; }
+
+usage() {
+  cat <<USAGE
+${BLUE}Xray VLESS + Vision + REALITY installer${NC}
+
+Usage:
+  ${SCRIPT_NAME} [options]
+
+Options:
+  -port <1-65535>          Listen port. Default: 443
+  -uuid <uuid>             VLESS UUID. Default: generated
+  -version <tag|latest>    Xray release tag, for example v25.4.30. Default: latest
+  -server-name <domain>    REALITY SNI/serverName. Default: ${REALITY_SERVER_NAME}
+  -target <host:port>      REALITY target. Default: ${REALITY_TARGET}
+  -fingerprint <name>      uTLS client fingerprint. Default: chrome
+  -short-id <hex>          REALITY shortId, even-length hex up to 16 chars. Default: random
+  -no-start                Install and validate config without starting systemd service
+  -uninstall               Stop service and remove installed files
+  -help                    Show this help
+
+Examples:
+  bash ${SCRIPT_NAME}
+  bash ${SCRIPT_NAME} -server-name aod.itunes.apple.com -target aod.itunes.apple.com:443
+USAGE
 }
 
-warn() {
-  echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-error() {
-  echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# 显示帮助信息
-show_help() {
-  echo -e "${BLUE}Xray VLESS + Vision + REALITY 安装脚本${NC}"
-  echo -e "用法: $0 [选项]"
-  echo
-  echo -e "选项:"
-  echo -e "  ${GREEN}-port${NC}        设置监听端口 (默认: 443)"
-  echo -e "  ${GREEN}-uuid${NC}        设置 VLESS UUID (默认: 随机生成)"
-  echo -e "  ${GREEN}-uninstall${NC}   卸载 Xray 服务及所有相关文件"
-  echo -e "  ${GREEN}-help${NC}        显示帮助信息"
-}
-
-# 参数解析
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -port)
-      if [[ -z "$2" || ! "$2" =~ ^[0-9]+$ ]]; then
-        error "端口必须是有效的数字"
-        exit 1
-      fi
-      PORT="$2"
-      shift 2
-      ;;
-    -uuid)
-      UUID="$2"
-      shift 2
-      ;;
-    -uninstall)
-      UNINSTALL=true
-      shift
-      ;;
-    -help)
-      show_help
-      exit 0
-      ;;
-    *)
-      error "未知参数: $1"
-      show_help
-      exit 1
-      ;;
-  esac
-done
-
-# 检查是否为 root 用户
-if [ "$EUID" -ne 0 ]; then
-  error "请使用 root 用户运行此脚本"
-  exit 1
-fi
-
-# 卸载函数
-uninstall() {
-  log "开始卸载 Xray 服务和相关文件..."
-  systemctl stop xray 2>/dev/null
-  systemctl disable xray 2>/dev/null
-  rm -f "$SERVICE_FILE"
-  systemctl daemon-reload
-  rm -rf "$BASE_DIR"
-  log "卸载完成！"
-  exit 0
-}
-
-# 如果是卸载模式，执行卸载函数
-if [ "$UNINSTALL" = true ]; then
-  uninstall
-fi
-
-# 安装依赖
-install_dependencies() {
-  log "安装必要的依赖..."
-  if command -v apt-get > /dev/null; then
-    apt-get update -qq && apt-get install -y -qq curl wget jq openssl unzip || {
-      error "安装依赖失败，请检查网络连接或手动安装"
-      exit 1
-    }
-  elif command -v yum > /dev/null; then
-    yum install -y -q curl wget jq openssl unzip || {
-      error "安装依赖失败，请检查网络连接或手动安装"
-      exit 1
-    }
-  else
-    error "不支持的包管理器，请手动安装 curl、wget、jq 和 openssl"
-    exit 1
+cleanup() {
+  local code=$?
+  if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
+    rm -rf "${TMP_DIR}"
   fi
-  log "依赖安装完成！"
+  if [[ ${code} -ne 0 ]]; then
+    warn "Aborted. Temporary files have been removed."
+  fi
+  exit "${code}"
+}
+trap cleanup EXIT INT TERM
+
+require_root() {
+  [[ "${EUID}" -eq 0 ]] || die "Please run this script as root."
 }
 
-verify_dependencies() {
-  DEPS=(curl wget jq unzip openssl)
-  for dep in "${DEPS[@]}"; do
-    if ! command -v "$dep" >/dev/null 2>&1; then
-      error "缺少依赖: $dep"
-      exit 1
-    fi
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+validate_port() {
+  [[ "$1" =~ ^[0-9]+$ ]] || die "Port must be numeric: $1"
+  (( "$1" >= 1 && "$1" <= 65535 )) || die "Port must be in range 1-65535: $1"
+}
+
+validate_uuid() {
+  [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]] \
+    || die "Invalid UUID: $1"
+}
+
+validate_domain() {
+  [[ "$1" =~ ^[A-Za-z0-9.-]+$ ]] || die "Invalid server name: $1"
+  [[ "$1" == *.* ]] || die "Server name should be a domain name: $1"
+}
+
+validate_target() {
+  [[ "$1" =~ ^[A-Za-z0-9.-]+:[0-9]+$ ]] || die "Target must be host:port: $1"
+  local target_port="${1##*:}"
+  validate_port "${target_port}"
+}
+
+validate_fingerprint() {
+  case "$1" in
+    chrome|firefox|safari|ios|android|edge|360|qq|random|randomized|randomizedalpn) ;;
+    *) die "Unsupported client fingerprint: $1" ;;
+  esac
+}
+
+validate_short_id() {
+  [[ "$1" =~ ^([0-9a-fA-F]{2}){0,8}$ ]] || die "shortId must be even-length hex, max 16 chars."
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -port)
+        [[ $# -ge 2 ]] || die "-port requires a value."
+        PORT="$2"
+        shift 2
+        ;;
+      -uuid)
+        [[ $# -ge 2 ]] || die "-uuid requires a value."
+        UUID="$2"
+        shift 2
+        ;;
+      -version)
+        [[ $# -ge 2 ]] || die "-version requires a value."
+        VERSION="$2"
+        shift 2
+        ;;
+      -server-name)
+        [[ $# -ge 2 ]] || die "-server-name requires a value."
+        REALITY_SERVER_NAME="$2"
+        if [[ "${TARGET_SET}" == false ]]; then
+          REALITY_TARGET="${REALITY_SERVER_NAME}:443"
+        fi
+        shift 2
+        ;;
+      -target)
+        [[ $# -ge 2 ]] || die "-target requires a value."
+        REALITY_TARGET="$2"
+        TARGET_SET=true
+        shift 2
+        ;;
+      -fingerprint)
+        [[ $# -ge 2 ]] || die "-fingerprint requires a value."
+        CLIENT_FINGERPRINT="$2"
+        shift 2
+        ;;
+      -short-id)
+        [[ $# -ge 2 ]] || die "-short-id requires a value."
+        SHORT_ID="$2"
+        shift 2
+        ;;
+      -no-start)
+        NO_START=true
+        shift
+        ;;
+      -uninstall)
+        UNINSTALL=true
+        shift
+        ;;
+      -help|--help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        usage
+        die "Unknown option: $1"
+        ;;
+    esac
   done
 }
 
-# 检测系统架构
-determine_architecture() {
-  log "检测系统架构..."
-  ARCH=$(uname -m)
-  case "$ARCH" in
-    x86_64) ARCH="64" ;;
-    aarch64) ARCH="arm64-v8a" ;;
-    armv7l) ARCH="arm32-v7a" ;;
-    armv6l) ARCH="arm32-v6" ;;
-    i386 | i686) ARCH="32" ;;
-    mips64le) ARCH="mips64le" ;;
-    mipsle) ARCH="mipsle" ;;
-    *)
-      error "不支持的架构：$ARCH"
-      exit 1
-      ;;
-  esac
-  log "检测到架构：$ARCH"
+validate_args() {
+  validate_port "${PORT}"
+  validate_domain "${REALITY_SERVER_NAME}"
+  validate_target "${REALITY_TARGET}"
+  validate_fingerprint "${CLIENT_FINGERPRINT}"
+  if [[ -n "${UUID}" ]]; then
+    validate_uuid "${UUID}"
+  fi
+  if [[ -n "${SHORT_ID}" ]]; then
+    validate_short_id "${SHORT_ID}"
+  fi
 }
 
-# 安装 Xray
-install_xray() {
-  log "下载并安装 Xray..."
-  mkdir -p "$INSTALL_DIR"
+install_dependencies() {
+  local deps=(curl unzip openssl ca-certificates)
+  log "Installing dependencies..."
 
-  # 获取最新版本
-  LATEST_VERSION=$(curl -s -m 10 https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
-  if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
-    warn "获取最新版本失败，尝试使用备用方法..."
-    LATEST_VERSION=$(curl -s -m 10 https://api.github.com/repos/XTLS/Xray-core/tags | jq -r '.[0].name')
-    
-    if [[ -z "$LATEST_VERSION" || "$LATEST_VERSION" == "null" ]]; then
-      error "无法获取 Xray 版本信息，请检查网络连接或 GitHub API 访问"
-      exit 1
-    fi
-  fi
-
-  DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/${LATEST_VERSION}/Xray-linux-${ARCH}.zip"
-  log "下载版本: ${LATEST_VERSION}, 架构: ${ARCH}"
-
-  # 下载并解压
-  wget -q -O "/tmp/xray.zip" "$DOWNLOAD_URL" || {
-    error "下载 Xray 失败，请检查网络连接"
-    exit 1
-  }
-  
-  # 验证下载文件
-  if [ -s "/tmp/xray.zip" ]; then
-    log "下载完成，验证文件..."
+  if command_exists apt-get; then
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${deps[@]}"
+  elif command_exists dnf; then
+    dnf install -y -q "${deps[@]}"
+  elif command_exists yum; then
+    yum install -y -q "${deps[@]}"
   else
-    error "下载的文件为空，请检查网络连接或下载链接"
-    exit 1
+    die "Unsupported package manager. Install manually: ${deps[*]}"
   fi
 
-  mkdir -p "/tmp/xray"
-  unzip -q "/tmp/xray.zip" -d "/tmp/xray" || {
-    error "解压 Xray 失败"
-    exit 1
-  }
-
-  # 移动文件并清理
-  mv "/tmp/xray/xray" "$INSTALL_DIR/xray" || {
-    error "安装 Xray 失败"
-    exit 1
-  }
-
-  rm -rf "/tmp/xray.zip" "/tmp/xray"
-  chmod +x "$INSTALL_DIR/xray"
-  log "Xray 已安装到 $INSTALL_DIR/xray"
+  for dep in curl unzip openssl; do
+    command_exists "${dep}" || die "Missing dependency after install: ${dep}"
+  done
 }
 
-# 生成 REALITY 密钥对
+generate_uuid() {
+  if [[ -n "${UUID}" ]]; then
+    return
+  fi
+
+  if [[ -r /proc/sys/kernel/random/uuid ]]; then
+    UUID="$(cat /proc/sys/kernel/random/uuid)"
+  elif command_exists uuidgen; then
+    UUID="$(uuidgen)"
+  else
+    local raw
+    raw="$(openssl rand -hex 16)"
+    UUID="${raw:0:8}-${raw:8:4}-4${raw:13:3}-8${raw:17:3}-${raw:20:12}"
+  fi
+}
+
+generate_short_id() {
+  if [[ -z "${SHORT_ID}" ]]; then
+    SHORT_ID="$(openssl rand -hex 8)"
+  fi
+}
+
+detect_arch() {
+  local machine arch
+  machine="$(uname -m)"
+
+  case "${machine}" in
+    x86_64|amd64) arch="64" ;;
+    aarch64|arm64) arch="arm64-v8a" ;;
+    armv7l|armv7) arch="arm32-v7a" ;;
+    armv6l|armv6) arch="arm32-v6" ;;
+    i386|i686) arch="32" ;;
+    mips64le) arch="mips64le" ;;
+    mipsle) arch="mipsle" ;;
+    *) die "Unsupported architecture: ${machine}" ;;
+  esac
+
+  printf '%s' "${arch}"
+}
+
+release_base_url() {
+  local arch="$1"
+  if [[ "${VERSION}" == "latest" ]]; then
+    printf 'https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-%s.zip' "${arch}"
+  else
+    printf 'https://github.com/XTLS/Xray-core/releases/download/%s/Xray-linux-%s.zip' "${VERSION}" "${arch}"
+  fi
+}
+
+download_file() {
+  local url="$1"
+  local dest="$2"
+  curl -fL --retry 3 --connect-timeout 10 --max-time 300 -o "${dest}" "${url}"
+}
+
+verify_checksum_if_available() {
+  local zip_file="$1"
+  local digest_file="$2"
+
+  [[ -s "${digest_file}" ]] || {
+    warn "Checksum file was not available; skipping checksum verification."
+    return
+  }
+
+  local expected actual
+  expected="$(grep -Eio '[a-f0-9]{64}' "${digest_file}" | head -n 1 || true)"
+  [[ -n "${expected}" ]] || {
+    warn "Checksum file did not contain a SHA-256 value; skipping checksum verification."
+    return
+  }
+
+  actual="$(openssl dgst -sha256 "${zip_file}" | awk '{print $NF}')"
+  [[ "${actual}" == "${expected}" ]] || die "Checksum verification failed."
+  log "Checksum verification passed."
+}
+
+install_xray() {
+  local arch zip_url zip_file digest_file extract_dir
+  arch="$(detect_arch)"
+  TMP_DIR="$(mktemp -d)"
+  zip_url="$(release_base_url "${arch}")"
+  zip_file="${TMP_DIR}/xray.zip"
+  digest_file="${TMP_DIR}/xray.zip.dgst"
+  extract_dir="${TMP_DIR}/extract"
+
+  log "Downloading Xray (${VERSION}, linux-${arch})..."
+  download_file "${zip_url}" "${zip_file}" || die "Failed to download Xray from ${zip_url}"
+
+  if download_file "${zip_url}.dgst" "${digest_file}" >/dev/null 2>&1; then
+    verify_checksum_if_available "${zip_file}" "${digest_file}"
+  else
+    warn "Could not download checksum asset; continuing without checksum verification."
+  fi
+
+  mkdir -p "${extract_dir}"
+  unzip -q "${zip_file}" -d "${extract_dir}"
+  [[ -x "${extract_dir}/xray" || -f "${extract_dir}/xray" ]] || die "Downloaded archive does not contain xray binary."
+
+  install -d -m 0750 "$(dirname "${INSTALL_PATH}")"
+  install -m 0755 "${extract_dir}/xray" "${INSTALL_PATH}"
+  log "Installed Xray to ${INSTALL_PATH}"
+}
+
+create_service_user() {
+  if [[ "${XRAY_USER}" == "root" ]]; then
+    return
+  fi
+
+  if id -u "${XRAY_USER}" >/dev/null 2>&1; then
+    return
+  fi
+
+  local nologin="/usr/sbin/nologin"
+  [[ -x "${nologin}" ]] || nologin="/sbin/nologin"
+
+  command_exists useradd || die "useradd is required to create service user ${XRAY_USER}."
+  useradd --system --no-create-home --home-dir "${STATE_DIR}" --shell "${nologin}" "${XRAY_USER}"
+}
+
 generate_reality_keypair() {
-  log "生成 REALITY 密钥对..."
-  warn "这可能需要一些时间，请耐心等待..."
-  KEYPAIR=$($INSTALL_DIR/xray x25519)
-  if [ $? -ne 0 ]; then
-    error "生成 REALITY 密钥对失败"
-    exit 1
-  fi
-  
-  # 解析密钥对
-  PRIVATE_KEY=$(echo "$KEYPAIR" | grep "PrivateKey" | awk -F: '{print $2}' | tr -d ' ')
-  PUBLIC_KEY=$(echo "$KEYPAIR" | grep "Password" | awk -F: '{print $2}' | tr -d ' ')
-  
-  if [[ -z "$PRIVATE_KEY" || -z "$PUBLIC_KEY" ]]; then
-    error "解析 REALITY 密钥对失败"
-    exit 1
-  fi
-  
-  log "REALITY 密钥对已生成！"
+  local keypair
+  log "Generating REALITY key pair..."
+  keypair="$("${INSTALL_PATH}" x25519)"
+
+  PRIVATE_KEY="$(awk -F': *' '/Private[[:space:]]*[Kk]ey|PrivateKey/ {print $2; exit}' <<<"${keypair}" | tr -d '[:space:]')"
+  PUBLIC_KEY="$(awk -F': *' '/Public[[:space:]]*[Kk]ey|Password/ {print $2; exit}' <<<"${keypair}" | tr -d '[:space:]')"
+
+  [[ -n "${PRIVATE_KEY}" && -n "${PUBLIC_KEY}" ]] || die "Failed to parse REALITY key pair."
 }
 
-# 创建配置文件
-create_config_file() {
-  log "创建配置文件..."
-  mkdir -p "$CONFIG_DIR"
-  cat > "$CONFIG_FILE" <<EOF
+write_config() {
+  log "Writing Xray config..."
+  install -d -m 0750 -o "${XRAY_USER}" -g "${XRAY_USER}" "${CONFIG_DIR}"
+  install -d -m 0750 -o "${XRAY_USER}" -g "${XRAY_USER}" "${STATE_DIR}"
+
+  umask 027
+  cat > "${CONFIG_FILE}" <<JSON
 {
   "log": {
     "loglevel": "warning"
   },
   "inbounds": [
     {
-      "listen": "::",
+      "listen": "0.0.0.0",
       "port": ${PORT},
       "protocol": "vless",
       "settings": {
@@ -252,12 +368,24 @@ create_config_file() {
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "target": "${DOMAIN}:443",
-          "serverNames": ["${DOMAIN}"],
+          "target": "${REALITY_TARGET}",
+          "serverNames": [
+            "${REALITY_SERVER_NAME}"
+          ],
           "privateKey": "${PRIVATE_KEY}",
-          "shortIds": ["${SHORT_ID}"],
-          "fingerprint": "ios"
+          "shortIds": [
+            "${SHORT_ID}"
+          ]
         }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": true
       }
     }
   ],
@@ -265,118 +393,155 @@ create_config_file() {
     {
       "protocol": "freedom",
       "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "block"
     }
   ]
 }
-EOF
-  log "配置文件已生成：$CONFIG_FILE"
+JSON
+
+  chown "${XRAY_USER}:${XRAY_USER}" "${CONFIG_FILE}"
+  chmod 0640 "${CONFIG_FILE}"
 }
 
-# 创建 systemd 服务
-create_systemd_service() {
-  log "创建 systemd 服务文件..."
-  cat > "$SERVICE_FILE" <<EOF
+write_service() {
+  log "Writing systemd service..."
+  cat > "${SERVICE_FILE}" <<SERVICE
 [Unit]
 Description=Xray Service
-After=network.target
+Documentation=https://xtls.github.io/
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${INSTALL_DIR}/xray run -c ${CONFIG_FILE}
+User=${XRAY_USER}
+Group=${XRAY_USER}
+ExecStart=${INSTALL_PATH} run -c ${CONFIG_FILE}
 Restart=on-failure
 RestartSec=5s
+LimitNOFILE=1048576
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=${STATE_DIR}
+ReadOnlyPaths=${CONFIG_DIR} ${INSTALL_PATH}
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SERVICE
 
-  systemctl daemon-reload || {
-    error "重新加载 systemd 失败"
-    exit 1
-  }
-  log "systemd 服务文件已创建：$SERVICE_FILE"
+  chmod 0644 "${SERVICE_FILE}"
+  systemctl daemon-reload
 }
 
-# 打印客户端配置
-print_client_config() {
-  log "获取服务器 IP 地址..."
-  SERVER_IP=$(curl -s https://api.ipify.org)
-  if [[ -z "$SERVER_IP" ]]; then
-    warn "无法获取服务器 IP 地址，将使用 localhost 代替"
-    SERVER_IP="localhost"
+validate_xray_config() {
+  log "Validating Xray config..."
+  "${INSTALL_PATH}" run -test -c "${CONFIG_FILE}" >/dev/null
+}
+
+start_service() {
+  if [[ "${NO_START}" == true ]]; then
+    warn "Skipping service start because -no-start was set."
+    return
   fi
 
-  VLESS_URL="vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${DOMAIN}&fp=ios&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}#${SERVER_IP}"
-  MIHOMO_CONFIG="proxies:
-  - name: ${SERVER_IP}
-    server: ${SERVER_IP}
+  log "Starting Xray service..."
+  systemctl enable --now xray
+  systemctl is-active --quiet xray || die "Xray failed to start. Check: journalctl -u xray -e --no-pager"
+}
+
+public_ip() {
+  local ip
+  ip="$(curl -fsS --connect-timeout 5 --max-time 10 https://api.ipify.org || true)"
+  [[ -n "${ip}" ]] || ip="SERVER_IP"
+  printf '%s' "${ip}"
+}
+
+print_client_config() {
+  local server_ip tag vless_url
+  server_ip="$(public_ip)"
+  tag="xray-${server_ip}"
+  vless_url="vless://${UUID}@${server_ip}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${REALITY_SERVER_NAME}&fp=${CLIENT_FINGERPRINT}&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=tcp#${tag}"
+
+  cat <<OUTPUT
+
+${BLUE}====== VLESS URL ======${NC}
+${vless_url}
+
+${BLUE}====== Mihomo / Clash Meta ======${NC}
+proxies:
+  - name: ${tag}
+    server: ${server_ip}
     port: ${PORT}
     type: vless
     uuid: ${UUID}
     tls: true
     udp: true
     flow: xtls-rprx-vision
+    network: tcp
+    servername: ${REALITY_SERVER_NAME}
+    client-fingerprint: ${CLIENT_FINGERPRINT}
     reality-opts:
       public-key: ${PUBLIC_KEY}
       short-id: ${SHORT_ID}
-    servername: ${DOMAIN}
-    client-fingerprint: ios
-    network: tcp"
 
-  echo
-  echo -e "${BLUE}====== 客户端配置 (Vless URL) ======${NC}"
-  echo -e "$VLESS_URL"
-  echo
-  echo -e "${BLUE}====== 客户端配置 (Mihomo 配置) ======${NC}"
-  echo -e "$MIHOMO_CONFIG"
-  echo
+${BLUE}====== Server files ======${NC}
+Binary:  ${INSTALL_PATH}
+Config:  ${CONFIG_FILE}
+State:   ${STATE_DIR}
+Service: ${SERVICE_FILE}
+OUTPUT
 }
 
-start_service() {
-  log "启动 Xray 服务..."
-  systemctl start xray || {
-    error "启动 Xray 服务失败，请检查日志: journalctl -u xray"
-    exit 1
-  }
+uninstall() {
+  log "Stopping and removing Xray..."
+  systemctl disable --now xray >/dev/null 2>&1 || true
+  rm -f "${SERVICE_FILE}"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  rm -rf "${BASE_DIR}"
 
-  systemctl enable xray || {
-    warn "设置 Xray 服务开机启动失败"
-  }
-
-  # 检查服务状态
-  if systemctl is-active --quiet xray; then
-    log "Xray 服务已成功启动并设置为开机启动！"
-  else
-    error "Xray 服务启动失败，请检查日志: journalctl -u xray"
-    exit 1
+  if [[ "${XRAY_USER}" != "root" ]] && id -u "${XRAY_USER}" >/dev/null 2>&1 && command_exists userdel; then
+    userdel "${XRAY_USER}" >/dev/null 2>&1 || warn "Could not remove user ${XRAY_USER}; remove it manually if unused."
   fi
+
+  log "Uninstall complete."
 }
 
-# 处理中断信号
-cleanup() {
-  echo
-  warn "安装被用户中断，正在清理..."
-  rm -rf "/tmp/xray.zip" "/tmp/xray"
-  exit 1
-}
-
-# 设置中断处理
-trap cleanup INT TERM
-
-# 主函数
 main() {
-  log "开始安装 Xray..."
+  parse_args "$@"
+  require_root
+
+  if [[ "${UNINSTALL}" == true ]]; then
+    uninstall
+    return
+  fi
+
+  validate_args
   install_dependencies
-  verify_dependencies
-  determine_architecture
+  generate_uuid
+  generate_short_id
+  validate_uuid "${UUID}"
+  validate_short_id "${SHORT_ID}"
   install_xray
+  create_service_user
   generate_reality_keypair
-  create_config_file
-  create_systemd_service
+  write_config
+  write_service
+  validate_xray_config
   start_service
-  log "Xray 安装完成！文件路径：$BASE_DIR"
   print_client_config
 }
 
-# 执行主函数
-main
+main "$@"
