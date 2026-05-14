@@ -216,7 +216,51 @@ release_base_url() {
 download_file() {
   local url="$1"
   local dest="$2"
-  curl -fL --retry 3 --connect-timeout 10 --max-time 300 -o "${dest}" "${url}"
+  curl -fsSL --retry 3 --connect-timeout 10 --max-time 300 -o "${dest}" "${url}"
+}
+
+mirror_url() {
+  local prefix="$1"
+  local url="$2"
+
+  if [[ -z "${prefix}" ]]; then
+    printf '%s' "${url}"
+  elif [[ "${prefix}" == *"{url}"* ]]; then
+    printf '%s' "${prefix/\{url\}/${url}}"
+  else
+    printf '%s/%s' "${prefix%/}" "${url}"
+  fi
+}
+
+download_with_mirrors() {
+  local url="$1"
+  local dest="$2"
+  local label="$3"
+  local prefixes=()
+  local prefix candidate
+
+  if [[ -n "${XRAY_DOWNLOAD_PREFIX:-}" ]]; then
+    prefixes+=("${XRAY_DOWNLOAD_PREFIX}")
+  fi
+
+  prefixes+=(
+    ""
+    "https://ghfast.top/"
+    "https://gh.llkk.cc/"
+    "https://gh-proxy.com/"
+    "https://hub.gitmirror.com/"
+  )
+
+  for prefix in "${prefixes[@]}"; do
+    candidate="$(mirror_url "${prefix}" "${url}")"
+    log "Trying ${label}: ${candidate}"
+    if download_file "${candidate}" "${dest}"; then
+      return 0
+    fi
+    warn "Failed: ${candidate}"
+  done
+
+  return 1
 }
 
 verify_checksum_if_available() {
@@ -250,9 +294,9 @@ install_xray() {
   extract_dir="${TMP_DIR}/extract"
 
   log "Downloading Xray (${VERSION}, linux-${arch})..."
-  download_file "${zip_url}" "${zip_file}" || die "Failed to download Xray from ${zip_url}"
+  download_with_mirrors "${zip_url}" "${zip_file}" "Xray archive" || die "Failed to download Xray from ${zip_url}"
 
-  if download_file "${zip_url}.dgst" "${digest_file}" >/dev/null 2>&1; then
+  if download_with_mirrors "${zip_url}.dgst" "${digest_file}" "Xray checksum" >/dev/null 2>&1; then
     verify_checksum_if_available "${zip_file}" "${digest_file}"
   else
     warn "Could not download checksum asset; continuing without checksum verification."

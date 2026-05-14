@@ -10,7 +10,7 @@
 - 安装路径恢复为 `/root/xray`，方便按原脚本习惯管理。
 - 因为 `/root` 默认不允许普通用户遍历，服务默认以 `root` 用户运行。
 - systemd 保留基础加固：`NoNewPrivileges`、`ProtectHome=read-only`、独立临时目录、仅保留绑定低端口能力。
-- 下载 Xray 后会在校验文件可用时验证 SHA-256。
+- 下载 Xray 时会先尝试 GitHub，失败后自动尝试常见 GitHub 镜像前缀；校验文件可用时验证 SHA-256。
 - 参数校验更严格：端口、UUID、短 ID、REALITY target、fingerprint 都会先验证。
 
 ## 使用方式
@@ -67,6 +67,32 @@ WebSocket 版本支持：
   -no-start                只安装并校验配置，不启动服务
   -uninstall               卸载服务和已安装文件
 ```
+
+## 下载镜像
+
+脚本默认按以下顺序下载 Xray：
+
+```text
+GitHub 原地址
+https://ghfast.top/
+https://gh.llkk.cc/
+https://gh-proxy.com/
+https://hub.gitmirror.com/
+```
+
+如果服务器无法访问 GitHub，脚本会自动尝试后面的镜像。也可以指定自己的镜像前缀：
+
+```shell
+XRAY_DOWNLOAD_PREFIX="https://ghfast.top/" bash install.sh
+```
+
+支持 `{url}` 模板形式：
+
+```shell
+XRAY_DOWNLOAD_PREFIX="https://example.com/proxy?url={url}" bash install.sh
+```
+
+第三方镜像只作为连通性兜底；如果对供应链完整性要求更高，建议固定 `-version` 并在可信网络环境下核对 release 校验值。
 
 ## 安装路径
 
