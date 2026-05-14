@@ -22,18 +22,6 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install.sh)
 ```
 
-如果服务器无法直连 GitHub Release，脚本会自动尝试内置 GitHub Proxy。也可以手动指定：
-
-```shell
-XRAY_DOWNLOAD_PROXY="https://ghfast.top/" bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install.sh)
-```
-
-WebSocket 版本同样支持：
-
-```shell
-XRAY_DOWNLOAD_PROXY="https://ghfast.top/" bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install-ws.sh)
-```
-
 ## 命令选项
 
 ```shell
