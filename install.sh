@@ -417,6 +417,16 @@ menu_header() {
 }
 
 do_install() {
+  if [[ -f "$CONFIG_FILE" || -f "$SERVICE_FILE" ]]; then
+    warn "检测到 Xray 已安装，继续将覆盖现有配置"
+    printf "${YELLOW}[?]${NC} 确认继续？[y/N]: "
+    read confirm || true
+    if [[ "$confirm" != [yY] ]]; then
+      warn "已取消"
+      return
+    fi
+  fi
+
   echo
   printf "${YELLOW}[?]${NC} 安装模式 (1: REALITY, 2: WebSocket) [默认: 1]: "
   read input_mode || true
