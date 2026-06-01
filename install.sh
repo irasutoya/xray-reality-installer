@@ -293,36 +293,37 @@ get_server_ip() {
   echo "${ip:-localhost}"
 }
 
-print_client_config() {
-  log "获取服务器 IP 地址..."
-  local server_ip vless_url mihomo_config
-  server_ip=$(get_server_ip)
+print_client_output() {
+  local mode="$1" server_ip="$2" port="$3" uuid="$4"
+  shift 4
 
-  if [[ "$MODE" == "reality" ]]; then
-    vless_url="vless://${UUID}@${server_ip}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${DOMAIN}&fp=${FINGERPRINT}&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}#${server_ip}"
+  local vless_url mihomo_config
+  if [[ "$mode" == "reality" ]]; then
+    local domain="$1" fingerprint="$2" public_key="$3" short_id="$4"
+    vless_url="vless://${uuid}@${server_ip}:${port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${short_id}#${server_ip}"
     mihomo_config="proxies:
   - name: ${server_ip}
     server: ${server_ip}
-    port: ${PORT}
+    port: ${port}
     type: vless
-    uuid: ${UUID}
+    uuid: ${uuid}
     tls: true
     udp: true
     flow: xtls-rprx-vision
     reality-opts:
-      public-key: ${PUBLIC_KEY}
-      short-id: ${SHORT_ID}
-    servername: ${DOMAIN}
-    client-fingerprint: ${FINGERPRINT}
+      public-key: ${public_key}
+      short-id: ${short_id}
+    servername: ${domain}
+    client-fingerprint: ${fingerprint}
     network: tcp"
   else
-    vless_url="vless://${UUID}@${server_ip}:${PORT}?type=ws&security=none&path=/#${server_ip}"
+    vless_url="vless://${uuid}@${server_ip}:${port}?type=ws&security=none&path=/#${server_ip}"
     mihomo_config="proxies:
   - name: ${server_ip}
     server: ${server_ip}
-    port: ${PORT}
+    port: ${port}
     type: vless
-    uuid: ${UUID}
+    uuid: ${uuid}
     tls: false
     udp: true
     ws-opts:
@@ -337,6 +338,13 @@ print_client_config() {
   echo -e "${BLUE}====== 客户端配置 (Mihomo 配置) ======${NC}"
   echo "$mihomo_config"
   echo
+}
+
+print_client_config() {
+  log "获取服务器 IP 地址..."
+  local server_ip
+  server_ip=$(get_server_ip)
+  print_client_output "$MODE" "$server_ip" "$PORT" "$UUID" "$DOMAIN" "$FINGERPRINT" "$PUBLIC_KEY" "$SHORT_ID"
 }
 
 start_service() {
@@ -379,7 +387,6 @@ show_config() {
 
   server_ip=$(get_server_ip)
 
-  local vless_url mihomo_config
   if [[ "$security" == "reality" ]]; then
     local domain private_key short_id fingerprint public_key
     domain=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' "$CONFIG_FILE")
@@ -391,46 +398,12 @@ show_config() {
       public_key=$("${INSTALL_DIR}/xray" x25519 -i "$private_key" 2>/dev/null | awk -F: 'tolower($1) ~ /public/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')
     fi
 
-    vless_url="vless://${uuid}@${server_ip}:${port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${short_id}#${server_ip}"
-    mihomo_config="proxies:
-  - name: ${server_ip}
-    server: ${server_ip}
-    port: ${port}
-    type: vless
-    uuid: ${uuid}
-    tls: true
-    udp: true
-    flow: xtls-rprx-vision
-    reality-opts:
-      public-key: ${public_key}
-      short-id: ${short_id}
-    servername: ${domain}
-    client-fingerprint: ${fingerprint}
-    network: tcp"
+    print_client_output "reality" "$server_ip" "$port" "$uuid" "$domain" "$fingerprint" "$public_key" "$short_id"
   elif [[ "$network" == "ws" ]]; then
-    vless_url="vless://${uuid}@${server_ip}:${port}?type=ws&security=none&path=/#${server_ip}"
-    mihomo_config="proxies:
-  - name: ${server_ip}
-    server: ${server_ip}
-    port: ${port}
-    type: vless
-    uuid: ${uuid}
-    tls: false
-    udp: true
-    ws-opts:
-      path: /
-    network: ws"
+    print_client_output "ws" "$server_ip" "$port" "$uuid"
   else
     fail "无法识别的配置类型 (security=${security}, network=${network})"
   fi
-
-  echo
-  echo -e "${BLUE}====== 客户端配置 (VLESS URL) ======${NC}"
-  echo "$vless_url"
-  echo
-  echo -e "${BLUE}====== 客户端配置 (Mihomo 配置) ======${NC}"
-  echo "$mihomo_config"
-  echo
 }
 
 menu_header() {
