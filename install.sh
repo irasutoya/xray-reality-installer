@@ -363,12 +363,25 @@ show_status() {
   fi
 }
 
+show_config() {
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    warn "配置文件不存在：$CONFIG_FILE"
+    return
+  fi
+  echo
+  echo -e "${BLUE}====== Xray 配置 (${CONFIG_FILE}) ======${NC}"
+  cat "$CONFIG_FILE"
+  echo
+  echo -e "${BLUE}========================================${NC}"
+}
+
 menu_header() {
   echo
   echo -e "${BLUE} >> 操作菜单${NC}"
   echo -e "   ${GREEN}1)${NC} 安装"
   echo -e "   ${GREEN}2)${NC} 卸载"
   echo -e "   ${GREEN}3)${NC} 查看状态"
+  echo -e "   ${GREEN}4)${NC} 查看配置"
   echo -e "   ${GREEN}0)${NC} 退出"
 }
 
@@ -429,7 +442,7 @@ main() {
   while true; do
     menu_header
     echo
-    printf "${YELLOW}[?]${NC} 请选择 [0-3]: "
+    printf "${YELLOW}[?]${NC} 请选择 [0-4]: "
     read choice || true
 
     case "$choice" in
@@ -445,6 +458,7 @@ main() {
         fi
         ;;
       3) show_status ;;
+      4) show_config ;;
       0) echo -e "${GREEN}[+]${NC} 再见"; exit 0 ;;
       *) echo -e "${RED}[!]${NC} 无效选择，请重新输入" ;;
     esac
