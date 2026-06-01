@@ -5,7 +5,7 @@ set -Eeuo pipefail
 
 MODE="reality"
 PORT=""
-DOMAIN="gateway.icloud.com"
+DOMAIN="aod.itunes.apple.com"
 UUID=""
 UNINSTALL=false
 PRIVATE_KEY=""
@@ -232,7 +232,7 @@ create_config_file() {
         "serverNames": ["${DOMAIN}"],
         "privateKey": "${PRIVATE_KEY}",
         "shortIds": ["${SHORT_ID}"],
-        "fingerprint": "ios"
+        "fingerprint": "chrome"
       }
     }
   }],
@@ -296,7 +296,7 @@ print_client_config() {
   server_ip=$(get_server_ip)
 
   if [[ "$MODE" == "reality" ]]; then
-    vless_url="vless://${UUID}@${server_ip}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${DOMAIN}&fp=ios&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}#${server_ip}"
+    vless_url="vless://${UUID}@${server_ip}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${DOMAIN}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}#${server_ip}"
     mihomo_config="proxies:
   - name: ${server_ip}
     server: ${server_ip}
@@ -310,7 +310,7 @@ print_client_config() {
       public-key: ${PUBLIC_KEY}
       short-id: ${SHORT_ID}
     servername: ${DOMAIN}
-    client-fingerprint: ios
+    client-fingerprint: chrome
     network: tcp"
   else
     vless_url="vless://${UUID}@${server_ip}:${PORT}?type=ws&security=none&path=/#${server_ip}"
