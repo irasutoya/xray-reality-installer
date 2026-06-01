@@ -21,15 +21,15 @@ YELLOW="\033[1;33m"
 NC="\033[0m"
 
 log() {
-  echo -e "${GREEN}[INFO]${NC} $1"
+  echo -e "${GREEN}[+]${NC} $1"
 }
 
 warn() {
-  echo -e "${YELLOW}[WARN]${NC} $1" >&2
+  echo -e "${YELLOW}[*]${NC} $1" >&2
 }
 
 error() {
-  echo -e "${RED}[ERROR]${NC} $1" >&2
+  echo -e "${RED}[!]${NC} $1" >&2
 }
 
 fail() {
@@ -108,7 +108,7 @@ cleanup_temp() {
 
 handle_interrupt() {
   echo
-  warn "安装被用户中断，正在清理..."
+  warn "操作被中断"
   exit 1
 }
 
@@ -119,7 +119,6 @@ uninstall() {
   rm -f "$SERVICE_FILE"
   systemctl daemon-reload
   rm -rf "$BASE_DIR"
-  log "卸载完成！"
 }
 
 install_dependencies() {
@@ -324,27 +323,73 @@ start_service() {
   fi
 }
 
-main() {
-  parse_args "$@"
-  require_root
-
-  if [[ "$UNINSTALL" == true ]]; then
-    uninstall
+show_status() {
+  if [[ ! -f "$SERVICE_FILE" ]]; then
+    warn "Xray 未安装"
     return
   fi
+  if systemctl is-active --quiet xray 2>/dev/null; then
+    log "Xray 服务状态：${GREEN}运行中${NC}"
+  else
+    warn "Xray 服务状态：${RED}未运行${NC}"
+  fi
+}
 
-  log "开始安装 Xray..."
-  install_dependencies
-  verify_dependencies
-  generate_uuid
-  validate_uuid "$UUID"
-  determine_architecture
-  install_xray
-  create_config_file
-  create_systemd_service
-  start_service
-  log "Xray 安装完成！文件路径：$BASE_DIR"
-  print_client_config
+menu_header() {
+  echo
+  echo -e "${BLUE} >> 操作菜单${NC}"
+  echo -e "   ${GREEN}1)${NC} 安装"
+  echo -e "   ${GREEN}2)${NC} 卸载"
+  echo -e "   ${GREEN}3)${NC} 查看状态"
+  echo -e "   ${GREEN}0)${NC} 退出"
+}
+
+main() {
+  require_root
+
+  while true; do
+    menu_header
+    echo
+    printf "${YELLOW}[?]${NC} 请选择 [0-3]: "
+    read choice || true
+
+    case "$choice" in
+      1)
+        install_dependencies
+        verify_dependencies
+        generate_uuid
+        validate_uuid "$UUID"
+        determine_architecture
+        install_xray
+        create_config_file
+        create_systemd_service
+        start_service
+        echo -e "${GREEN}[+]${NC} Xray 安装完成！文件路径：$BASE_DIR"
+        print_client_config
+        ;;
+      2)
+        echo
+        printf "${YELLOW}[?]${NC} 确认卸载？[y/N]: "
+        read confirm || true
+        if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+          uninstall
+          echo -e "${GREEN}[+]${NC} Xray 已卸载"
+        else
+          warn "取消卸载"
+        fi
+        ;;
+      3)
+        show_status
+        ;;
+      0)
+        echo -e "${GREEN}[+]${NC} 再见"
+        exit 0
+        ;;
+      *)
+        echo -e "${RED}[!]${NC} 无效选择，请重新输入"
+        ;;
+    esac
+  done
 }
 
 trap cleanup_temp EXIT
