@@ -33,12 +33,6 @@ WebSocket 模式：
 bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install.sh) -mode ws
 ```
 
-也支持传统入口：
-
-```shell
-bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install-ws.sh)
-```
-
 ## 命令选项
 
 ```shell
