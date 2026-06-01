@@ -11,6 +11,7 @@ UNINSTALL=false
 PRIVATE_KEY=""
 PUBLIC_KEY=""
 SHORT_ID=""
+FINGERPRINT="chrome"
 TEMP_DIR=""
 ARCH=""
 
@@ -40,6 +41,7 @@ show_help() {
   echo -e "  ${GREEN}-port${NC}       监听端口 (默认: reality=443, ws=80)"
   echo -e "  ${GREEN}-uuid${NC}       VLESS UUID (默认: 随机生成)"
   echo -e "  ${GREEN}-domain${NC}     伪装域名 (仅 reality 模式, 默认: ${DOMAIN})"
+  echo -e "  ${GREEN}-fingerprint${NC} 客户端指纹 (仅 reality 模式, 默认: ${FINGERPRINT})"
   echo -e "  ${GREEN}-uninstall${NC}  卸载 Xray 服务及所有相关文件"
   echo -e "  ${GREEN}-help${NC}       显示帮助信息"
 }
@@ -66,6 +68,7 @@ parse_args() {
       -port)      [[ -n "${2:-}" ]] || fail "-port 需要指定端口"; validate_port "$2"; PORT="$2"; shift 2 ;;
       -uuid)      [[ -n "${2:-}" ]] || fail "-uuid 需要指定 UUID"; validate_uuid "$2"; UUID="$2"; shift 2 ;;
       -domain)    DOMAIN="$2"; shift 2 ;;
+      -fingerprint) FINGERPRINT="$2"; shift 2 ;;
       -uninstall) UNINSTALL=true; shift ;;
       -help)      show_help; exit 0 ;;
       *)          fail "未知参数: $1" ;;
@@ -232,7 +235,7 @@ create_config_file() {
         "serverNames": ["${DOMAIN}"],
         "privateKey": "${PRIVATE_KEY}",
         "shortIds": ["${SHORT_ID}"],
-        "fingerprint": "chrome"
+        "fingerprint": "${FINGERPRINT}"
       }
     }
   }],
@@ -296,7 +299,7 @@ print_client_config() {
   server_ip=$(get_server_ip)
 
   if [[ "$MODE" == "reality" ]]; then
-    vless_url="vless://${UUID}@${server_ip}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${DOMAIN}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}#${server_ip}"
+    vless_url="vless://${UUID}@${server_ip}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${DOMAIN}&fp=${FINGERPRINT}&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}#${server_ip}"
     mihomo_config="proxies:
   - name: ${server_ip}
     server: ${server_ip}
@@ -310,7 +313,7 @@ print_client_config() {
       public-key: ${PUBLIC_KEY}
       short-id: ${SHORT_ID}
     servername: ${DOMAIN}
-    client-fingerprint: chrome
+    client-fingerprint: ${FINGERPRINT}
     network: tcp"
   else
     vless_url="vless://${UUID}@${server_ip}:${PORT}?type=ws&security=none&path=/#${server_ip}"
@@ -388,6 +391,12 @@ do_install() {
     printf "${YELLOW}[?]${NC} 伪装域名 (默认: ${DOMAIN}): "
     read input_domain || true
     DOMAIN="${input_domain:-$DOMAIN}"
+
+    echo
+    echo -e "${GREEN}可用指纹:${NC} chrome, firefox, safari, ios, android, edge, 360, qq, random"
+    printf "${YELLOW}[?]${NC} 客户端指纹 (默认: ${FINGERPRINT}): "
+    read input_fp || true
+    FINGERPRINT="${input_fp:-$FINGERPRINT}"
   fi
 
   printf "${YELLOW}[?]${NC} VLESS UUID (留空自动生成): "
