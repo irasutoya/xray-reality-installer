@@ -385,6 +385,20 @@ main() {
 
     case "$choice" in
       1)
+        echo
+        printf "${YELLOW}[?]${NC} 监听端口 (默认: 443): "
+        read input_port || true
+        PORT="${input_port:-443}"
+        validate_port "$PORT"
+
+        printf "${YELLOW}[?]${NC} 伪装域名 (默认: gateway.icloud.com): "
+        read input_domain || true
+        DOMAIN="${input_domain:-gateway.icloud.com}"
+
+        printf "${YELLOW}[?]${NC} VLESS UUID (留空自动生成): "
+        read input_uuid || true
+        UUID="${input_uuid:-}"
+
         install_dependencies
         verify_dependencies
         generate_uuid

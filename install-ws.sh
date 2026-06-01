@@ -355,6 +355,16 @@ main() {
 
     case "$choice" in
       1)
+        echo
+        printf "${YELLOW}[?]${NC} 监听端口 (默认: 80): "
+        read input_port || true
+        PORT="${input_port:-80}"
+        validate_port "$PORT"
+
+        printf "${YELLOW}[?]${NC} VLESS UUID (留空自动生成): "
+        read input_uuid || true
+        UUID="${input_uuid:-}"
+
         install_dependencies
         verify_dependencies
         generate_uuid
