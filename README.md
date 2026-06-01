@@ -1,14 +1,14 @@
 # Xray 代理服务一键安装脚本
 
-用于在 Linux 服务器上自动安装和配置 Xray。仓库提供两个安装入口：
+在 Linux 服务器上自动安装和配置 Xray，支持两种模式：
 
-- `install.sh`: VLESS + Vision + REALITY，默认端口 `443`
-- `install-ws.sh`: VLESS + WebSocket，默认端口 `80`
+- **REALITY 模式**：`-mode reality`，VLESS + Vision + REALITY，默认端口 `443`
+- **WebSocket 模式**：`-mode ws`，VLESS + WebSocket，默认端口 `80`
 
 ## 功能
 
 - 自动检测系统架构并下载对应版本的 Xray
-- 自动生成 UUID；REALITY 模式会额外生成密钥对和 short ID
+- 自动生成 UUID；REALITY 模式额外生成密钥对和 short ID
 - 自动创建 Xray 配置文件和 systemd 服务
 - 安装完成后输出 VLESS URL 与 Mihomo 配置
 - 支持卸载已安装的 Xray 服务和相关文件
@@ -21,13 +21,19 @@
 
 ## 使用方法
 
-REALITY 模式：
+REALITY 模式（默认）：
 
 ```shell
 bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install.sh)
 ```
 
 WebSocket 模式：
+
+```shell
+bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install.sh) -mode ws
+```
+
+也支持传统入口：
 
 ```shell
 bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install-ws.sh)
@@ -39,8 +45,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install-
 用法: install.sh [选项]
 
 选项:
-  -port        设置监听端口，REALITY 默认 443，WebSocket 默认 80
+  -mode        安装模式: reality (默认) 或 ws
+  -port        监听端口，REALITY 默认 443，WebSocket 默认 80
   -uuid        设置 VLESS UUID，默认随机生成
+  -domain      伪装域名（仅 REALITY 模式，默认 gateway.icloud.com）
   -uninstall   卸载 Xray 服务及所有相关文件
   -help        显示帮助信息
 ```
@@ -48,8 +56,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray/main/install-
 示例：
 
 ```shell
-bash install.sh -port 8443
-bash install-ws.sh -port 8080 -uuid 00000000-0000-4000-8000-000000000000
+bash install.sh -mode ws -port 8080
+bash install.sh -mode reality -port 8443 -domain cloudflare.com
+bash install.sh -port 8080 -uuid 00000000-0000-4000-8000-000000000000
 bash install.sh -uninstall
 ```
 

@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
-
-# Xray VLESS + Vision + REALITY 安装脚本
+# Xray 一键安装脚本（支持 VLESS+REALITY 和 VLESS+WebSocket）
 
 set -Eeuo pipefail
 
-BASE_DIR="/root/xray"
-INSTALL_DIR="${BASE_DIR}/bin"
-CONFIG_DIR="${BASE_DIR}/config"
-SERVICE_FILE="/etc/systemd/system/xray.service"
-CONFIG_FILE="${CONFIG_DIR}/config.json"
+MODE="reality"
+PORT=""
 DOMAIN="gateway.icloud.com"
-PORT=443
 UUID=""
 UNINSTALL=false
 PRIVATE_KEY=""
 PUBLIC_KEY=""
 SHORT_ID=""
 TEMP_DIR=""
+ARCH=""
+
+BASE_DIR="/root/xray"
+INSTALL_DIR="${BASE_DIR}/bin"
+CONFIG_DIR="${BASE_DIR}/config"
+SERVICE_FILE="/etc/systemd/system/xray.service"
+CONFIG_FILE="${CONFIG_DIR}/config.json"
 
 GREEN="\033[1;32m"
 RED="\033[1;31m"
@@ -24,96 +26,63 @@ BLUE="\033[1;34m"
 YELLOW="\033[1;33m"
 NC="\033[0m"
 
-log() {
-  echo -e "${GREEN}[+]${NC} $1"
-}
-
-warn() {
-  echo -e "${YELLOW}[*]${NC} $1" >&2
-}
-
-error() {
-  echo -e "${RED}[!]${NC} $1" >&2
-}
-
-fail() {
-  error "$1"
-  exit 1
-}
+log()  { echo -e "${GREEN}[+]${NC} $1"; }
+warn() { echo -e "${YELLOW}[*]${NC} $1" >&2; }
+error(){ echo -e "${RED}[!]${NC} $1" >&2; }
+fail() { error "$1"; exit 1; }
 
 show_help() {
-  echo -e "${BLUE}Xray VLESS + Vision + REALITY 安装脚本${NC}"
+  echo -e "${BLUE}Xray 一键安装脚本${NC}"
   echo "用法: $0 [选项]"
   echo
   echo "选项:"
-  echo -e "  ${GREEN}-port${NC}        设置监听端口 (默认: 443)"
-  echo -e "  ${GREEN}-uuid${NC}        设置 VLESS UUID (默认: 随机生成)"
-  echo -e "  ${GREEN}-uninstall${NC}   卸载 Xray 服务及所有相关文件"
-  echo -e "  ${GREEN}-help${NC}        显示帮助信息"
+  echo -e "  ${GREEN}-mode${NC}       安装模式: reality (默认) 或 ws"
+  echo -e "  ${GREEN}-port${NC}       监听端口 (默认: reality=443, ws=80)"
+  echo -e "  ${GREEN}-uuid${NC}       VLESS UUID (默认: 随机生成)"
+  echo -e "  ${GREEN}-domain${NC}     伪装域名 (仅 reality 模式, 默认: ${DOMAIN})"
+  echo -e "  ${GREEN}-uninstall${NC}  卸载 Xray 服务及所有相关文件"
+  echo -e "  ${GREEN}-help${NC}       显示帮助信息"
 }
 
 validate_port() {
   local port="$1"
-  if [[ ! "$port" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
-    fail "端口必须是 1-65535 之间的数字"
-  fi
+  [[ "$port" =~ ^[0-9]+$ ]] || fail "端口必须是 1-65535 之间的数字"
+  port=$((10#$port))
+  ((port >= 1 && port <= 65535)) || fail "端口必须是 1-65535 之间的数字"
 }
 
 validate_uuid() {
-  local uuid="$1"
-  if [[ ! "$uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]]; then
-    fail "UUID 格式无效"
-  fi
+  [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]] || fail "UUID 格式无效"
+}
+
+validate_mode() {
+  [[ "$1" == "reality" || "$1" == "ws" ]] || fail "安装模式必须是 reality 或 ws"
 }
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -port)
-        [[ -n "${2:-}" ]] || fail "-port 需要指定端口"
-        validate_port "$2"
-        PORT="$2"
-        shift 2
-        ;;
-      -uuid)
-        [[ -n "${2:-}" ]] || fail "-uuid 需要指定 UUID"
-        validate_uuid "$2"
-        UUID="$2"
-        shift 2
-        ;;
-      -uninstall)
-        UNINSTALL=true
-        shift
-        ;;
-      -help)
-        show_help
-        exit 0
-        ;;
-      *)
-        error "未知参数: $1"
-        show_help
-        exit 1
-        ;;
+      -mode)      validate_mode "${2:-}"; MODE="$2"; shift 2 ;;
+      -port)      [[ -n "${2:-}" ]] || fail "-port 需要指定端口"; validate_port "$2"; PORT="$2"; shift 2 ;;
+      -uuid)      [[ -n "${2:-}" ]] || fail "-uuid 需要指定 UUID"; validate_uuid "$2"; UUID="$2"; shift 2 ;;
+      -domain)    DOMAIN="$2"; shift 2 ;;
+      -uninstall) UNINSTALL=true; shift ;;
+      -help)      show_help; exit 0 ;;
+      *)          fail "未知参数: $1" ;;
     esac
   done
 }
 
 require_root() {
-  if [[ "${EUID}" -ne 0 ]]; then
-    fail "请使用 root 用户运行此脚本"
-  fi
+  [[ "${EUID}" -eq 0 ]] || fail "请使用 root 用户运行此脚本"
 }
 
 cleanup_temp() {
-  if [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]]; then
-    rm -rf "$TEMP_DIR"
-  fi
+  [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]] && rm -rf "$TEMP_DIR"
 }
 
 handle_interrupt() {
-  echo
-  warn "操作被中断"
-  exit 1
+  echo; warn "操作被中断"; exit 1
 }
 
 uninstall() {
@@ -123,25 +92,29 @@ uninstall() {
   rm -f "$SERVICE_FILE"
   systemctl daemon-reload
   rm -rf "$BASE_DIR"
+  log "Xray 已卸载"
 }
 
 install_dependencies() {
-  log "安装必要的依赖..."
+  local pkgs=(curl wget jq unzip)
+  [[ "$MODE" == "reality" ]] && pkgs+=(openssl)
+
+  log "安装必要的依赖 (${pkgs[*]})..."
   if command -v apt-get >/dev/null 2>&1; then
-    apt-get update -qq
-    apt-get install -y -qq curl wget jq openssl unzip
+    apt-get update -qq && apt-get install -y -qq "${pkgs[@]}"
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y -q curl wget jq openssl unzip
+    dnf install -y -q "${pkgs[@]}"
   elif command -v yum >/dev/null 2>&1; then
-    yum install -y -q curl wget jq openssl unzip
+    yum install -y -q "${pkgs[@]}"
   else
-    fail "不支持的包管理器，请手动安装 curl、wget、jq、openssl 和 unzip"
+    fail "不支持的包管理器，请手动安装 ${pkgs[*]}"
   fi
   log "依赖安装完成！"
 }
 
 verify_dependencies() {
-  local deps=(curl wget jq openssl unzip)
+  local deps=(curl wget jq unzip)
+  [[ "$MODE" == "reality" ]] && deps+=(openssl)
   local dep
   for dep in "${deps[@]}"; do
     command -v "$dep" >/dev/null 2>&1 || fail "缺少依赖: $dep"
@@ -149,12 +122,9 @@ verify_dependencies() {
 }
 
 generate_uuid() {
-  if [[ -n "$UUID" ]]; then
-    return
-  fi
-
+  [[ -n "$UUID" ]] && return
   if [[ -r /proc/sys/kernel/random/uuid ]]; then
-    UUID=$(cat /proc/sys/kernel/random/uuid)
+    UUID=$(< /proc/sys/kernel/random/uuid)
   elif command -v uuidgen >/dev/null 2>&1; then
     UUID=$(uuidgen)
   else
@@ -171,26 +141,26 @@ determine_architecture() {
   local machine
   machine=$(uname -m)
   case "$machine" in
-    x86_64) ARCH="64" ;;
-    aarch64) ARCH="arm64-v8a" ;;
-    armv7l) ARCH="arm32-v7a" ;;
-    armv6l) ARCH="arm32-v6" ;;
-    i386 | i686) ARCH="32" ;;
-    mips64le) ARCH="mips64le" ;;
-    mipsle) ARCH="mipsle" ;;
-    *) fail "不支持的架构：$machine" ;;
+    x86_64)    ARCH="64" ;;
+    aarch64)   ARCH="arm64-v8a" ;;
+    armv7l)    ARCH="arm32-v7a" ;;
+    armv6l)    ARCH="arm32-v6" ;;
+    i386|i686) ARCH="32" ;;
+    mips64le)  ARCH="mips64le" ;;
+    mipsle)    ARCH="mipsle" ;;
+    *)         fail "不支持的架构：$machine" ;;
   esac
   log "检测到架构：$ARCH"
 }
 
 fetch_latest_version() {
   local version
-  version=$(curl -fsSLm 10 https://api.github.com/repos/XTLS/Xray-core/releases/latest 2>/dev/null | jq -r '.tag_name // empty' 2>/dev/null || true)
+  version=$(curl -fsSLm 10 "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/dev/null | jq -r '.tag_name // empty' 2>/dev/null || true)
   if [[ -z "$version" ]]; then
     warn "获取最新版本失败，尝试读取 tags..."
-    version=$(curl -fsSLm 10 https://api.github.com/repos/XTLS/Xray-core/tags 2>/dev/null | jq -r '.[0].name // empty' 2>/dev/null || true)
+    version=$(curl -fsSLm 10 "https://api.github.com/repos/XTLS/Xray-core/tags" 2>/dev/null | jq -r '.[0].name // empty' 2>/dev/null || true)
   fi
-  printf '%s' "$version"
+  echo "$version"
 }
 
 install_xray() {
@@ -230,8 +200,8 @@ generate_reality_keypair() {
 
   local keypair
   keypair=$("${INSTALL_DIR}/xray" x25519) || fail "生成 REALITY 密钥对失败"
-  PRIVATE_KEY=$(printf '%s\n' "$keypair" | awk -F: 'tolower($1) ~ /private/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')
-  PUBLIC_KEY=$(printf '%s\n' "$keypair" | awk -F: 'tolower($1) ~ /public|password/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')
+  PRIVATE_KEY=$(awk -F: 'tolower($1) ~ /private/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' <<< "$keypair")
+  PUBLIC_KEY=$(awk -F: 'tolower($1) ~ /public|password/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' <<< "$keypair")
 
   [[ -n "$PRIVATE_KEY" && -n "$PUBLIC_KEY" ]] || fail "解析 REALITY 密钥对失败"
   log "REALITY 密钥对已生成！"
@@ -240,53 +210,63 @@ generate_reality_keypair() {
 create_config_file() {
   log "创建配置文件..."
   mkdir -p "$CONFIG_DIR"
-  cat >"$CONFIG_FILE" <<EOF
+
+  if [[ "$MODE" == "reality" ]]; then
+    cat > "$CONFIG_FILE" <<EOF
 {
-  "log": {
-    "loglevel": "warning"
-  },
-  "inbounds": [
-    {
-      "listen": "::",
-      "port": ${PORT},
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "${UUID}",
-            "flow": "xtls-rprx-vision"
-          }
-        ],
-        "decryption": "none"
-      },
-      "streamSettings": {
-        "network": "raw",
-        "security": "reality",
-        "realitySettings": {
-          "show": false,
-          "target": "${DOMAIN}:443",
-          "serverNames": ["${DOMAIN}"],
-          "privateKey": "${PRIVATE_KEY}",
-          "shortIds": ["${SHORT_ID}"],
-          "fingerprint": "ios"
-        }
+  "log": { "loglevel": "warning" },
+  "inbounds": [{
+    "listen": "::",
+    "port": ${PORT},
+    "protocol": "vless",
+    "settings": {
+      "clients": [{ "id": "${UUID}", "flow": "xtls-rprx-vision" }],
+      "decryption": "none"
+    },
+    "streamSettings": {
+      "network": "raw",
+      "security": "reality",
+      "realitySettings": {
+        "show": false,
+        "target": "${DOMAIN}:443",
+        "serverNames": ["${DOMAIN}"],
+        "privateKey": "${PRIVATE_KEY}",
+        "shortIds": ["${SHORT_ID}"],
+        "fingerprint": "ios"
       }
     }
-  ],
-  "outbounds": [
-    {
-      "protocol": "freedom",
-      "tag": "direct"
-    }
-  ]
+  }],
+  "outbounds": [{ "protocol": "freedom", "tag": "direct" }]
 }
 EOF
+  else
+    cat > "$CONFIG_FILE" <<EOF
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [{
+    "listen": "::",
+    "port": ${PORT},
+    "protocol": "vless",
+    "settings": {
+      "clients": [{ "id": "${UUID}", "level": 0 }],
+      "decryption": "none"
+    },
+    "streamSettings": {
+      "network": "ws",
+      "security": "none",
+      "wsSettings": { "path": "/" }
+    }
+  }],
+  "outbounds": [{ "protocol": "freedom", "tag": "direct" }]
+}
+EOF
+  fi
   log "配置文件已生成：$CONFIG_FILE"
 }
 
 create_systemd_service() {
   log "创建 systemd 服务文件..."
-  cat >"$SERVICE_FILE" <<EOF
+  cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Xray Service
 After=network.target
@@ -300,22 +280,24 @@ RestartSec=5s
 [Install]
 WantedBy=multi-user.target
 EOF
-
   systemctl daemon-reload || fail "重新加载 systemd 失败"
   log "systemd 服务文件已创建：$SERVICE_FILE"
+}
+
+get_server_ip() {
+  local ip
+  ip=$(curl -fsSLm 10 https://api.ipify.org 2>/dev/null || true)
+  echo "${ip:-localhost}"
 }
 
 print_client_config() {
   log "获取服务器 IP 地址..."
   local server_ip vless_url mihomo_config
-  server_ip=$(curl -fsSLm 10 https://api.ipify.org 2>/dev/null || true)
-  if [[ -z "$server_ip" ]]; then
-    warn "无法获取服务器 IP 地址，将使用 localhost 代替"
-    server_ip="localhost"
-  fi
+  server_ip=$(get_server_ip)
 
-  vless_url="vless://${UUID}@${server_ip}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${DOMAIN}&fp=ios&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}#${server_ip}"
-  mihomo_config="proxies:
+  if [[ "$MODE" == "reality" ]]; then
+    vless_url="vless://${UUID}@${server_ip}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${DOMAIN}&fp=ios&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}#${server_ip}"
+    mihomo_config="proxies:
   - name: ${server_ip}
     server: ${server_ip}
     port: ${PORT}
@@ -330,6 +312,20 @@ print_client_config() {
     servername: ${DOMAIN}
     client-fingerprint: ios
     network: tcp"
+  else
+    vless_url="vless://${UUID}@${server_ip}:${PORT}?type=ws&security=none&path=/#${server_ip}"
+    mihomo_config="proxies:
+  - name: ${server_ip}
+    server: ${server_ip}
+    port: ${PORT}
+    type: vless
+    uuid: ${UUID}
+    tls: false
+    udp: true
+    ws-opts:
+      path: /
+    network: ws"
+  fi
 
   echo
   echo -e "${BLUE}====== 客户端配置 (VLESS URL) ======${NC}"
@@ -343,7 +339,6 @@ print_client_config() {
 start_service() {
   log "启动 Xray 服务..."
   systemctl start xray || fail "启动 Xray 服务失败，请检查日志: journalctl -u xray"
-
   systemctl enable xray || warn "设置 Xray 服务开机启动失败"
 
   if systemctl is-active --quiet xray; then
@@ -366,16 +361,58 @@ show_status() {
 }
 
 menu_header() {
+  local mode_label
+  [[ "$MODE" == "reality" ]] && mode_label="VLESS+REALITY" || mode_label="VLESS+WebSocket"
   echo
-  echo -e "${BLUE} >> 操作菜单${NC}"
+  echo -e "${BLUE} >> 操作菜单 [${mode_label}]${NC}"
   echo -e "   ${GREEN}1)${NC} 安装"
   echo -e "   ${GREEN}2)${NC} 卸载"
   echo -e "   ${GREEN}3)${NC} 查看状态"
   echo -e "   ${GREEN}0)${NC} 退出"
 }
 
+do_install() {
+  local default_port=443
+  [[ "$MODE" == "ws" ]] && default_port=80
+
+  echo
+  printf "${YELLOW}[?]${NC} 监听端口 (默认: ${default_port}): "
+  read input_port || true
+  PORT="${input_port:-$default_port}"
+  validate_port "$PORT"
+
+  if [[ "$MODE" == "reality" ]]; then
+    printf "${YELLOW}[?]${NC} 伪装域名 (默认: ${DOMAIN}): "
+    read input_domain || true
+    DOMAIN="${input_domain:-$DOMAIN}"
+  fi
+
+  printf "${YELLOW}[?]${NC} VLESS UUID (留空自动生成): "
+  read input_uuid || true
+  UUID="${input_uuid:-}"
+
+  install_dependencies
+  verify_dependencies
+  generate_uuid
+  validate_uuid "$UUID"
+  [[ "$MODE" == "reality" ]] && generate_short_id
+  determine_architecture
+  install_xray
+  [[ "$MODE" == "reality" ]] && generate_reality_keypair
+  create_config_file
+  create_systemd_service
+  start_service
+  echo -e "${GREEN}[+]${NC} Xray 安装完成！文件路径：$BASE_DIR"
+  print_client_config
+}
+
 main() {
   require_root
+
+  if [[ "$UNINSTALL" == true ]]; then
+    uninstall
+    exit 0
+  fi
 
   while true; do
     menu_header
@@ -384,56 +421,20 @@ main() {
     read choice || true
 
     case "$choice" in
-      1)
-        echo
-        printf "${YELLOW}[?]${NC} 监听端口 (默认: 443): "
-        read input_port || true
-        PORT="${input_port:-443}"
-        validate_port "$PORT"
-
-        printf "${YELLOW}[?]${NC} 伪装域名 (默认: gateway.icloud.com): "
-        read input_domain || true
-        DOMAIN="${input_domain:-gateway.icloud.com}"
-
-        printf "${YELLOW}[?]${NC} VLESS UUID (留空自动生成): "
-        read input_uuid || true
-        UUID="${input_uuid:-}"
-
-        install_dependencies
-        verify_dependencies
-        generate_uuid
-        validate_uuid "$UUID"
-        generate_short_id
-        determine_architecture
-        install_xray
-        generate_reality_keypair
-        create_config_file
-        create_systemd_service
-        start_service
-        echo -e "${GREEN}[+]${NC} Xray 安装完成！文件路径：$BASE_DIR"
-        print_client_config
-        ;;
+      1) do_install ;;
       2)
         echo
         printf "${YELLOW}[?]${NC} 确认卸载？[y/N]: "
         read confirm || true
-        if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+        if [[ "$confirm" == [yY] ]]; then
           uninstall
-          echo -e "${GREEN}[+]${NC} Xray 已卸载"
         else
           warn "取消卸载"
         fi
         ;;
-      3)
-        show_status
-        ;;
-      0)
-        echo -e "${GREEN}[+]${NC} 再见"
-        exit 0
-        ;;
-      *)
-        echo -e "${RED}[!]${NC} 无效选择，请重新输入"
-        ;;
+      3) show_status ;;
+      0) echo -e "${GREEN}[+]${NC} 再见"; exit 0 ;;
+      *) echo -e "${RED}[!]${NC} 无效选择，请重新输入" ;;
     esac
   done
 }
