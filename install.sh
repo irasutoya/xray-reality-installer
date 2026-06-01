@@ -361,10 +361,8 @@ show_status() {
 }
 
 menu_header() {
-  local mode_label
-  [[ "$MODE" == "reality" ]] && mode_label="VLESS+REALITY" || mode_label="VLESS+WebSocket"
   echo
-  echo -e "${BLUE} >> 操作菜单 [${mode_label}]${NC}"
+  echo -e "${BLUE} >> 操作菜单${NC}"
   echo -e "   ${GREEN}1)${NC} 安装"
   echo -e "   ${GREEN}2)${NC} 卸载"
   echo -e "   ${GREEN}3)${NC} 查看状态"
@@ -372,10 +370,15 @@ menu_header() {
 }
 
 do_install() {
+  echo
+  printf "${YELLOW}[?]${NC} 安装模式 (1: REALITY, 2: WebSocket) [默认: 1]: "
+  read input_mode || true
+  MODE="reality"
+  [[ "${input_mode:-1}" == "2" ]] && MODE="ws"
+
   local default_port=443
   [[ "$MODE" == "ws" ]] && default_port=80
 
-  echo
   printf "${YELLOW}[?]${NC} 监听端口 (默认: ${default_port}): "
   read input_port || true
   PORT="${input_port:-$default_port}"
