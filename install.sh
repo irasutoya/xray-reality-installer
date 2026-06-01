@@ -368,11 +368,69 @@ show_config() {
     warn "配置文件不存在：$CONFIG_FILE"
     return
   fi
+
+  log "正在读取 Xray 配置..."
+  local port uuid network security server_ip
+  port=$(jq -r '.inbounds[0].port // empty' "$CONFIG_FILE")
+  uuid=$(jq -r '.inbounds[0].settings.clients[0].id // empty' "$CONFIG_FILE")
+  security=$(jq -r '.inbounds[0].streamSettings.security // "none"' "$CONFIG_FILE")
+  network=$(jq -r '.inbounds[0].streamSettings.network // "raw"' "$CONFIG_FILE")
+  [[ -z "$port" || -z "$uuid" ]] && fail "无法读取配置，请检查 ${CONFIG_FILE}"
+
+  server_ip=$(get_server_ip)
+
+  local vless_url mihomo_config
+  if [[ "$security" == "reality" ]]; then
+    local domain private_key short_id fingerprint public_key
+    domain=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' "$CONFIG_FILE")
+    private_key=$(jq -r '.inbounds[0].streamSettings.realitySettings.privateKey // empty' "$CONFIG_FILE")
+    short_id=$(jq -r '.inbounds[0].streamSettings.realitySettings.shortIds[0] // empty' "$CONFIG_FILE")
+    fingerprint=$(jq -r '.inbounds[0].streamSettings.realitySettings.fingerprint // "chrome"' "$CONFIG_FILE")
+
+    if [[ -n "$private_key" ]] && [[ -x "${INSTALL_DIR}/xray" ]]; then
+      public_key=$("${INSTALL_DIR}/xray" x25519 -i "$private_key" 2>/dev/null | awk -F: 'tolower($1) ~ /public/ {gsub(/[[:space:]]/, "", $2); print $2; exit}')
+    fi
+
+    vless_url="vless://${uuid}@${server_ip}:${port}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${domain}&fp=${fingerprint}&pbk=${public_key}&sid=${short_id}#${server_ip}"
+    mihomo_config="proxies:
+  - name: ${server_ip}
+    server: ${server_ip}
+    port: ${port}
+    type: vless
+    uuid: ${uuid}
+    tls: true
+    udp: true
+    flow: xtls-rprx-vision
+    reality-opts:
+      public-key: ${public_key}
+      short-id: ${short_id}
+    servername: ${domain}
+    client-fingerprint: ${fingerprint}
+    network: tcp"
+  elif [[ "$network" == "ws" ]]; then
+    vless_url="vless://${uuid}@${server_ip}:${port}?type=ws&security=none&path=/#${server_ip}"
+    mihomo_config="proxies:
+  - name: ${server_ip}
+    server: ${server_ip}
+    port: ${port}
+    type: vless
+    uuid: ${uuid}
+    tls: false
+    udp: true
+    ws-opts:
+      path: /
+    network: ws"
+  else
+    fail "无法识别的配置类型 (security=${security}, network=${network})"
+  fi
+
   echo
-  echo -e "${BLUE}====== Xray 配置 (${CONFIG_FILE}) ======${NC}"
-  cat "$CONFIG_FILE"
+  echo -e "${BLUE}====== 客户端配置 (VLESS URL) ======${NC}"
+  echo "$vless_url"
   echo
-  echo -e "${BLUE}========================================${NC}"
+  echo -e "${BLUE}====== 客户端配置 (Mihomo 配置) ======${NC}"
+  echo "$mihomo_config"
+  echo
 }
 
 menu_header() {
