@@ -2,46 +2,53 @@
 
 在使用 systemd 的 Linux 服务器上安装和管理 VLESS + Vision + REALITY。
 
-## 主要特性
+## 功能
 
-- 交互菜单和非交互命令行安装
-- 自动识别架构、安装缺少的依赖并获取 Xray 最新稳定版
-- 下载官方 `.dgst` 文件并执行 SHA-256 完整性校验
-- 写入前使用 `xray run -test` 验证配置
-- 覆盖安装失败时自动恢复旧二进制、配置和服务状态
-- 自动生成 UUID、REALITY 密钥和 short ID
-- 配置文件权限为 `600`，systemd 服务包含基础安全加固
-- 输出 VLESS URL 和 Mihomo 配置
+- 交互菜单与非交互安装
+- 自动识别 Xray 官方发布架构
+- 下载官方 `.dgst` 文件并校验 SHA-256
+- 写入系统前执行 `xray run -test -config`
+- 使用 `nobody` 用户运行，通过 `CAP_NET_BIND_SERVICE` 监听 443
+- 安装失败时恢复原二进制、配置、服务文件和服务状态
+- 输出 VLESS URL 与 Mihomo 配置
+
+## 默认参数
+
+- 端口：`443`
+- REALITY 目标域名：`itunes.apple.com`
+- 客户端指纹：`chrome`
+- Xray 版本：GitHub 最新稳定版
 
 ## 系统要求
 
 - 使用 systemd 的 Linux 发行版
-- 使用 `root` 用户运行
-- 包管理器：`apt-get`、`dnf`、`yum`、`zypper`、`pacman` 或 `apk`
-- 支持常见的 x86、ARM、MIPS、PowerPC、RISC-V 和 s390x 架构
+- 使用 `root` 用户执行
+- 支持 `apt-get`、`dnf`、`yum`、`zypper` 或 `pacman`
 
 ## 使用方法
 
-打开交互菜单：
+交互菜单：
 
 ```shell
 bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray-reality-installer/main/install.sh)
 ```
 
-使用默认参数非交互安装：
+使用默认参数直接安装：
 
 ```shell
 bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray-reality-installer/main/install.sh) --install
 ```
 
-指定端口和 REALITY 目标域名：
+指定参数：
 
 ```shell
-bash <(curl -fsSL https://raw.githubusercontent.com/irasutoya/xray-reality-installer/main/install.sh) \
-  --install --port 443 --domain itunes.apple.com
+bash install.sh --install \
+  --port 443 \
+  --domain itunes.apple.com \
+  --fingerprint chrome
 ```
 
-如果已安装，脚本默认拒绝在非交互模式下覆盖。确认覆盖时添加 `--force`：
+覆盖已有安装：
 
 ```shell
 bash install.sh --install --force
@@ -67,28 +74,33 @@ bash install.sh --install --force
 
 ## 安装路径
 
-- 主目录：`/root/xray`
-- 可执行文件：`/root/xray/bin/xray`
-- 服务端配置：`/root/xray/config/config.json`
-- 客户端元数据：`/root/xray/config/client.json`
+路径与 XTLS 官方安装器保持一致：
+
+- Xray：`/usr/local/bin/xray`
+- 服务端配置：`/usr/local/etc/xray/config.json`
+- 客户端元数据：`/usr/local/etc/xray/client.json`
 - systemd 服务：`/etc/systemd/system/xray.service`
 
-配置和客户端元数据仅允许 root 读取。`client.json` 不包含 REALITY 私钥。
+旧版脚本的 `/root/xray` 会在新版本安装成功后清理。
 
-## REALITY 目标域名
-
-默认目标域名为 `itunes.apple.com`。固定域名并不适合所有服务器；如需调整，应优先选择与服务器位于同一 ASN、支持 TLS 1.3、连接稳定且证书域名匹配的站点。
-
-## 故障排除
+## 管理与排错
 
 ```shell
-systemctl status xray --no-pager -l
-journalctl -u xray -n 100 --no-pager
 bash install.sh --status
 bash install.sh --show-config
+bash install.sh --uninstall
+systemctl status xray --no-pager -l
+journalctl -u xray -n 100 --no-pager
 ```
 
-还需要确认服务器防火墙和云平台安全组已放行监听端口。
+还需要在服务器防火墙和云平台安全组中放行监听端口。
+
+## 上游参考
+
+- [XTLS/Xray-core](https://github.com/XTLS/Xray-core)
+- [XTLS/Xray-install](https://github.com/XTLS/Xray-install)
+- [XTLS/REALITY](https://github.com/XTLS/REALITY)
+- [REALITY 配置文档](https://xtls.github.io/config/transports/reality.html)
 
 ## 本地检查
 
