@@ -83,6 +83,13 @@ assert_fails "缺少参数值时给出错误" parse_args --domain
 )
 pass "兼容旧版单横线参数"
 
+(
+  is_installed() { return 1; }
+  FORCE=false
+  ensure_overwrite_allowed false
+)
+pass "首次安装时继续执行而不是退出"
+
 TEMP_DIR=$(mktemp -d)
 PORT=443
 UUID=00000000-0000-4000-8000-000000000000

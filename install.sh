@@ -583,7 +583,7 @@ ask_yes_no() {
 
 ensure_overwrite_allowed() {
   local interactive="$1"
-  is_installed || return
+  is_installed || return 0
   warn "检测到已有 Xray 安装，继续会替换二进制和配置"
   [[ "$FORCE" == true ]] && return
   if [[ "$interactive" == true ]]; then
