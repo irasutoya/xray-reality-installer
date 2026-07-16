@@ -94,7 +94,6 @@ bash install.sh --show-config
 
 ```shell
 bash -n install.sh
-bash tests/install_test.sh
 ```
 
 ## 免责声明
